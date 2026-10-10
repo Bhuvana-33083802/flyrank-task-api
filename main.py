@@ -10,7 +10,7 @@ app = FastAPI(
     ),
     version="1.0.0",
 )
-# --- in-memory "database" ---
+
 tasks = [
     {"id": 1, "title": "Buy milk", "done": False},
     {"id": 2, "title": "Book dentist appointment", "done": True},
