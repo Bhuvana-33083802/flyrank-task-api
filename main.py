@@ -11,11 +11,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
-tasks = [
+# --- in-memory "database": 3 seeded example tasks ---
+SEED_TASKS = [
     {"id": 1, "title": "Buy milk", "done": False},
     {"id": 2, "title": "Book dentist appointment", "done": True},
     {"id": 3, "title": "Finish FlyRank Week 2 assignment", "done": False},
 ]
+
+# the live list — a copy, so /reset can restore the seed without touching it
+tasks = [dict(t) for t in SEED_TASKS]
+
 
 class TaskCreate(BaseModel):
     title: str | None = Field(
@@ -23,6 +28,7 @@ class TaskCreate(BaseModel):
         description="The text of the task. Required, must not be blank.",
         examples=["Buy milk"],
     )
+
 
 class TaskUpdate(BaseModel):
     title: str | None = Field(
@@ -36,11 +42,13 @@ class TaskUpdate(BaseModel):
         examples=[True],
     )
 
+
 def find_task(task_id: int):
     for task in tasks:
         if task["id"] == task_id:
             return task
     return None
+
 
 @app.get("/", tags=["meta"], summary="Describe this API")
 def read_root():
@@ -48,18 +56,26 @@ def read_root():
     return {
         "name": "Task API",
         "version": "1.0.0",
-        "endpoints": ["/tasks", "/tasks/{id}"],
+        "endpoints": ["/tasks", "/tasks/{id}", "/stats", "/reset"],
     }
+
 
 @app.get("/health", tags=["meta"], summary="Health check")
 def health():
     """Cheap liveness check used by monitoring tools."""
     return {"status": "ok"}
 
+
 @app.get("/tasks", tags=["tasks"], summary="List all tasks")
-def list_tasks():
-    """Return every task currently in memory."""
-    return tasks
+def list_tasks(done: bool | None = None, search: str | None = None):
+    """Return tasks, optionally filtered by completion and/or a title search."""
+    result = tasks
+    if done is not None:
+        result = [t for t in result if t["done"] == done]
+    if search:
+        result = [t for t in result if search.lower() in t["title"].lower()]
+    return result
+
 
 @app.get(
     "/tasks/{task_id}",
@@ -73,6 +89,7 @@ def get_task(task_id: int):
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
     return task
+
 
 @app.post(
     "/tasks",
@@ -94,6 +111,7 @@ def create_task(payload: TaskCreate):
     tasks.append(new_task)
     return new_task
 
+
 @app.put(
     "/tasks/{task_id}",
     tags=["tasks"],
@@ -114,14 +132,17 @@ def update_task(task_id: int, payload: TaskUpdate):
             status_code=400,
             detail="provide at least one field to update: title, done",
         )
+
     if payload.title is not None:
         if not payload.title.strip():
             raise HTTPException(status_code=400, detail="title must not be empty")
         task["title"] = payload.title.strip()
+
     if payload.done is not None:
         task["done"] = payload.done
 
     return task
+
 
 @app.delete(
     "/tasks/{task_id}",
@@ -138,3 +159,19 @@ def delete_task(task_id: int):
 
     tasks.remove(task)
     return None
+
+
+@app.get("/stats", tags=["tasks"], summary="Task counts")
+def stats():
+    """Return totals for the whole task list."""
+    total = len(tasks)
+    done = sum(1 for t in tasks if t["done"])
+    return {"total": total, "done": done, "open": total - done}
+
+
+@app.post("/reset", tags=["tasks"], summary="Restore the seed tasks")
+def reset_tasks():
+    """Reset the in-memory list back to the 3 example tasks."""
+    tasks.clear()
+    tasks.extend(dict(t) for t in SEED_TASKS)
+    return {"status": "reset", "count": len(tasks)}
